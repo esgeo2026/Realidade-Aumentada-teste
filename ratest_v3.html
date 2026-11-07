@@ -7,7 +7,16 @@
   <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
   <style>
-    html, body { margin: 0; overflow: hidden; background: #000; font-family: system-ui, sans-serif; }
+    /* Só o "html" fica preto (aparece apenas antes da câmera ligar).
+       O "body" é transparente para deixar a imagem da câmera, que fica atrás, aparecer. */
+    html { background: #000; }
+    html, body { margin: 0; overflow: hidden; font-family: system-ui, sans-serif; }
+    body { background: transparent; }
+    a-scene, .a-canvas { background: transparent !important; }
+    /* Modo projeção: o preto some e as cores claras brilham, como luz de projetor sobre o ambiente */
+    body.projecao .a-canvas { mix-blend-mode: screen; }
+    #cTransp { width: 110px; vertical-align: middle; }
+    #rotTransp { font-size: 13px; padding: 0 4px; }
     .arjs-loader { height: 100%; width: 100%; position: fixed; top: 0; left: 0; z-index: 9999;
       background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; }
     .arjs-loader div { text-align: center; color: #fff; font-size: 1.1em; padding: 0 24px; }
@@ -61,6 +70,8 @@
       <button data-v="2">2x</button>
       <button data-v="4">4x</button>
       <button id="bRotulos" class="on">Rótulos</button>
+      <button id="bProj">Modo projeção</button>
+      <span id="rotTransp">Opacidade <input id="cTransp" type="range" min="20" max="100" value="100" /></span>
     </div>
   </div>
 
@@ -374,6 +385,17 @@
       bR.addEventListener('click', function () {
         SIM.labels = !SIM.labels; bR.classList.toggle('on', SIM.labels);
         document.querySelectorAll('.label').forEach(function (e) { e.setAttribute('visible', SIM.labels); });
+      });
+
+      // Modo projeção: preto vira transparente e as cores brilham sobre o ambiente
+      var bPj = document.getElementById('bProj');
+      bPj.addEventListener('click', function () {
+        bPj.classList.toggle('on', document.body.classList.toggle('projecao'));
+      });
+      // Opacidade da animação: abaixe para enxergar mais o ambiente por baixo
+      document.getElementById('cTransp').addEventListener('input', function (ev) {
+        var c = document.querySelector('.a-canvas');
+        if (c) c.style.opacity = ev.target.value / 100;
       });
 
       document.getElementById('bIniciar').addEventListener('click', iniciarCamera);
