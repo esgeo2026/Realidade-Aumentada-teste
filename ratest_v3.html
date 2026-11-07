@@ -15,6 +15,13 @@
     a-scene, .a-canvas { background: transparent !important; }
     /* Modo projeção: o preto some e as cores claras brilham, como luz de projetor sobre o ambiente */
     body.projecao .a-canvas { mix-blend-mode: screen; }
+    /* Botões de zoom e foco, na lateral direita */
+    #zoomCtl { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: flex;
+      flex-direction: column; gap: 6px; pointer-events: auto; }
+    #zoomCtl button { border: 0; border-radius: 18px; padding: 10px 12px; font-size: 15px; color: #fff;
+      background: rgba(20,20,30,.72); min-width: 56px; }
+    #zoomCtl button.on { background: #2f7de1; }
+    body { touch-action: none; }  /* o gesto de pinça é nosso, não do navegador */
     #cTransp { width: 110px; vertical-align: middle; }
     #rotTransp { font-size: 13px; padding: 0 4px; }
     .arjs-loader { height: 100%; width: 100%; position: fixed; top: 0; left: 0; z-index: 9999;
@@ -63,6 +70,13 @@
       <div id="info"><b id="mes">-</b><br /><span id="estacao"></span></div>
     </div>
     <div id="dica">Rotação e Lua em velocidade exagerada para ficar visível. Distâncias fora de escala.</div>
+    <div id="zoomCtl">
+      <button id="bMais">+</button>
+      <button id="bMenos">&minus;</button>
+      <button data-foco="geral" class="on">Geral</button>
+      <button data-foco="terra">Terra</button>
+      <button data-foco="lua">Lua</button>
+    </div>
     <div id="controles">
       <button id="bPausa">Pausar</button>
       <button data-v="0.5">0,5x</button>
@@ -94,7 +108,7 @@
     <a-marker id="marcador" preset="hiro" size="1"
       smooth="true" smoothCount="10" smoothTolerance="0.006" smoothThreshold="4">
 
-      <a-entity id="sistema" position="0 0.5 0" trail="target: #terra">
+      <a-entity id="sistema" position="0 0.5 0" trail="target: #terra" zoom-foco>
 
         <a-light type="ambient" intensity="0.35" color="#aab8ff"></a-light>
         <a-light type="point" intensity="1.7" distance="0" decay="0" color="#fff4d6"></a-light>
@@ -107,7 +121,7 @@
           <a-entity earth-body="radius: 0.07"></a-entity>
           <a-entity class="label" billboard position="0 0.2 0"
             text="value: Terra; align: center; width: 0.55; color: #9fd0ff"></a-entity>
-          <a-entity moon-body="radius: 0.02; distance: 0.15"></a-entity>
+          <a-entity id="lua" moon-body="radius: 0.02; distance: 0.15"></a-entity>
         </a-entity>
 
         <a-entity class="label" billboard position="0 0.3 0"
@@ -341,6 +355,33 @@
       }
     });
 
+    // ---------- zoom e foco ----------
+    // escala: quanto a cena está ampliada. alvo: para onde ela amplia (geral, terra ou lua).
+    var ZOOM = { escala: 1, alvo: 1, foco: 'geral' };
+    var ESCALA_MIN = 0.5, ESCALA_MAX = 10;
+    function limita(v) { return Math.max(ESCALA_MIN, Math.min(ESCALA_MAX, v)); }
+
+    // Amplia o sistema inteiro e, nos modos Terra/Lua, desloca a cena para
+    // manter o astro escolhido no centro do marcador, mesmo enquanto ele se move.
+    AFRAME.registerComponent('zoom-foco', {
+      init: function () {
+        this.F = new THREE.Vector3();
+        this.terra = document.getElementById('terra');
+        this.lua = document.getElementById('lua');
+      },
+      tick: function () {
+        // suaviza a mudança de zoom (aproxima aos poucos)
+        ZOOM.escala += (ZOOM.alvo - ZOOM.escala) * 0.15;
+        var s = ZOOM.escala, F = this.F.set(0, 0, 0);
+        if (ZOOM.foco !== 'geral') {
+          F.copy(this.terra.object3D.position);
+          if (ZOOM.foco === 'lua') F.add(this.lua.object3D.position);
+        }
+        this.el.object3D.scale.set(s, s, s);
+        this.el.object3D.position.set(-F.x * s, 0.5 - F.y * s, -F.z * s);
+      }
+    });
+
     // rótulos sempre virados para a câmera
     AFRAME.registerComponent('billboard', {
       init: function () { this.v = new THREE.Vector3(); },
@@ -386,6 +427,37 @@
         SIM.labels = !SIM.labels; bR.classList.toggle('on', SIM.labels);
         document.querySelectorAll('.label').forEach(function (e) { e.setAttribute('visible', SIM.labels); });
       });
+
+      // Botões de zoom (+ e -) e de foco (Geral, Terra, Lua)
+      var focos = Array.prototype.slice.call(document.querySelectorAll('#zoomCtl button[data-foco]'));
+      var ZOOM_INICIAL = { geral: 1, terra: 4, lua: 8 };   // zoom sugerido ao escolher cada foco
+      focos.forEach(function (b) {
+        b.addEventListener('click', function () {
+          ZOOM.foco = b.getAttribute('data-foco');
+          ZOOM.alvo = ZOOM_INICIAL[ZOOM.foco];
+          marca(focos, b);
+        });
+      });
+      document.getElementById('bMais').addEventListener('click', function () { ZOOM.alvo = limita(ZOOM.alvo * 1.3); });
+      document.getElementById('bMenos').addEventListener('click', function () { ZOOM.alvo = limita(ZOOM.alvo / 1.3); });
+
+      // Pinça com dois dedos: afastar amplia, aproximar reduz
+      var distAntes = 0;
+      function distancia(ev) {
+        var a = ev.touches[0], b = ev.touches[1];
+        return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      }
+      document.addEventListener('touchstart', function (ev) {
+        if (ev.touches.length === 2) distAntes = distancia(ev);
+      }, { passive: true });
+      document.addEventListener('touchmove', function (ev) {
+        if (ev.touches.length !== 2 || !distAntes) return;
+        var d = distancia(ev);
+        ZOOM.alvo = limita(ZOOM.alvo * d / distAntes);
+        ZOOM.escala = ZOOM.alvo;   // acompanha o dedo sem atraso
+        distAntes = d;
+      }, { passive: true });
+      document.addEventListener('touchend', function () { distAntes = 0; }, { passive: true });
 
       // Modo projeção: preto vira transparente e as cores brilham sobre o ambiente
       var bPj = document.getElementById('bProj');
