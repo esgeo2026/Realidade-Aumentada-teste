@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MVP AR - Translação da Terra</title>
+  <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+  <style>
+    .arjs-loader { height: 100%; width: 100%; position: fixed; top: 0; left: 0;
+      background: rgba(0,0,0,0.8); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+    .arjs-loader div { text-align: center; font-family: sans-serif; color: #fff; font-size: 1.2em; }
+    .instrucao { position: fixed; bottom: 16px; left: 0; right: 0; text-align: center;
+      font-family: sans-serif; color: #fff; text-shadow: 0 0 4px #000; z-index: 10; pointer-events: none; }
+  </style>
+</head>
+<body style="margin:0; overflow:hidden;">
+  <div class="arjs-loader"><div>Carregando câmera e modelo...<br>Permita o acesso à câmera.</div></div>
+  <div class="instrucao">Aponte a câmera para o marcador Hiro impresso</div>
+
+  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" vr-mode-ui="enabled: false">
+    <a-marker preset="hiro" id="marcador">
+
+      <!-- Sol no centro do marcador -->
+      <a-sphere id="sol" radius="0.35" color="#FDB813" position="0 0.35 0" shadow="cast: false">
+        <a-text value="Sol" align="center" position="0 0.5 0" scale="0.8 0.8 0.8" color="#FFFFFF"></a-text>
+      </a-sphere>
+
+      <!-- Pivô da translação: gira em torno do Sol (eixo Y) -->
+      <a-entity id="orbita-terra" position="0 0.35 0"
+        animation="property: rotation; to: 0 360 0; loop: true; dur: 12000; easing: linear">
+
+        <!-- Terra: posicionada na órbita e girando em torno do próprio eixo (rotação) -->
+        <a-entity position="1.4 0 0">
+          <a-sphere radius="0.12" color="#3B8BEB"
+            animation="property: rotation; to: 0 360 0; loop: true; dur: 2000; easing: linear">
+          </a-sphere>
+          <a-text value="Terra" align="center" position="0 0.22 0" scale="0.5 0.5 0.5" color="#FFFFFF"></a-text>
+        </a-entity>
+
+      </a-entity>
+    </a-marker>
+    <a-entity camera></a-entity>
+  </a-scene>
+</body>
+</html>
