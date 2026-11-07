@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>RA - Rotação e Translação da Terra</title>
+  <script src="https://aframe.io/releases/1.0.4/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+  <style>
+    html, body { margin: 0; overflow: hidden; background: #000; font-family: system-ui, sans-serif; }
+    .arjs-loader { height: 100%; width: 100%; position: fixed; top: 0; left: 0; z-index: 9999;
+      background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; }
+    .arjs-loader div { text-align: center; color: #fff; font-size: 1.1em; padding: 0 24px; }
+    #hud { position: fixed; inset: 0; z-index: 50; pointer-events: none; color: #fff;
+      text-shadow: 0 1px 4px #000, 0 0 8px #000; }
+    #topo { position: absolute; top: 10px; left: 0; right: 0; text-align: center; }
+    #status { display: inline-block; padding: 4px 12px; border-radius: 14px; font-size: 13px;
+      background: rgba(180,60,40,.85); }
+    #status.ok { background: rgba(30,140,70,.85); }
+    #info { margin-top: 8px; font-size: 15px; line-height: 1.35; }
+    #info b { font-size: 20px; }
+    #controles { position: absolute; bottom: 14px; left: 0; right: 0; display: flex; gap: 6px;
+      justify-content: center; flex-wrap: wrap; padding: 0 8px; pointer-events: auto; }
+    #controles button { border: 0; border-radius: 18px; padding: 9px 13px; font-size: 14px; color: #fff;
+      background: rgba(20,20,30,.72); backdrop-filter: blur(4px); }
+    #controles button.on { background: #2f7de1; }
+    #dica { position: absolute; bottom: 62px; left: 0; right: 0; text-align: center; font-size: 12px; opacity: .9; }
+  </style>
+</head>
+<body>
+  <div class="arjs-loader"><div>Carregando câmera e cena 3D...<br />Permita o acesso à câmera.</div></div>
+
+  <div id="hud">
+    <div id="topo">
+      <span id="status">Procurando o marcador Hiro...</span>
+      <div id="info"><b id="mes">-</b><br /><span id="estacao"></span></div>
+    </div>
+    <div id="dica">Rotação e Lua em velocidade exagerada para ficar visível. Distâncias fora de escala.</div>
+    <div id="controles">
+      <button id="bPausa">Pausar</button>
+      <button data-v="0.5">0,5x</button>
+      <button data-v="1" class="on">1x</button>
+      <button data-v="2">2x</button>
+      <button data-v="4">4x</button>
+      <button id="bRotulos" class="on">Rótulos</button>
+    </div>
+  </div>
+
+  <!--
+    Ajustes de precisão do rastreamento (arjs):
+    - sourceWidth/Height e displayWidth/Height: resolução do vídeo da câmera (mais alto = leitura mais nítida do marcador).
+    - detectionMode "mono" + trackingMethod "best": usa a detecção de padrão (Hiro) com o melhor método disponível.
+    - maxDetectionRate: quantas detecções por segundo.
+    No a-marker:
+    - smooth/smoothCount/smoothTolerance/smoothThreshold: suavizam a vibração do objeto sobre o marcador.
+  -->
+  <a-scene embedded vr-mode-ui="enabled: false" renderer="antialias: true; alpha: true; precision: mediump" sim-clock
+    arjs="sourceType: webcam; trackingMethod: best; detectionMode: mono; maxDetectionRate: 60;
+          sourceWidth: 1280; sourceHeight: 960; displayWidth: 1280; displayHeight: 960; debugUIEnabled: false;">
+
+    <a-marker id="marcador" preset="hiro" size="1"
+      smooth="true" smoothCount="10" smoothTolerance="0.006" smoothThreshold="4">
+
+      <a-entity id="sistema" position="0 0.5 0" trail="target: #terra">
+
+        <a-light type="ambient" intensity="0.35" color="#aab8ff"></a-light>
+        <a-light type="point" intensity="1.7" distance="0" decay="0" color="#fff4d6"></a-light>
+
+        <a-entity id="sol" sun-body="radius: 0.16"></a-entity>
+        <a-entity orbit-ring="radius: 0.8"></a-entity>
+        <a-entity season-marks="radius: 0.8"></a-entity>
+
+        <a-entity id="terra" earth-orbit="radius: 0.8">
+          <a-entity earth-body="radius: 0.07"></a-entity>
+          <a-entity class="label" billboard position="0 0.2 0"
+            text="value: Terra; align: center; width: 0.55; color: #9fd0ff"></a-entity>
+          <a-entity moon-body="radius: 0.02; distance: 0.15"></a-entity>
+        </a-entity>
+
+        <a-entity class="label" billboard position="0 0.3 0"
+          text="value: Sol; align: center; width: 0.55; color: #ffd060"></a-entity>
+      </a-entity>
+    </a-marker>
+
+    <a-entity camera></a-entity>
+  </a-scene>
+
+  <script>
+  (function () {
+    var THREE = AFRAME.THREE;
+    var DEG = Math.PI / 180;
+    var TILT = 23.44 * DEG;      // inclinação do eixo da Terra
+    var JUNE_DAY = 172;          // solstício de junho (dia do ano)
+
+    // Estado compartilhado da simulação
+    var SIM = { year: 0.22, yearSeconds: 30, speed: 1, paused: false, labels: true };
+
+    // ---------- utilitários de textura (tudo gerado por código, sem imagens externas) ----------
+    function rng(seed) {
+      var s = seed;
+      return function () { s = (s * 1664525 + 1013904223) % 4294967296; return s / 4294967296; };
+    }
+
+    function earthTexture() {
+      var c = document.createElement('canvas'); c.width = 1024; c.height = 512;
+      var g = c.getContext('2d'), r = rng(7);
+      var sea = g.createLinearGradient(0, 0, 0, 512);
+      sea.addColorStop(0, '#14508f'); sea.addColorStop(0.5, '#1f72bd'); sea.addColorStop(1, '#14508f');
+      g.fillStyle = sea; g.fillRect(0, 0, 1024, 512);
+
+      var cores = ['#3e8e47', '#5a9a3c', '#8aa352', '#c9b26b'];
+      for (var i = 0; i < 46; i++) {
+        var cx = r() * 1024, cy = 70 + r() * 372, rad = 18 + r() * 50, pts = [];
+        for (var k = 0; k <= 9; k++) {
+          var a = k / 9 * Math.PI * 2, rr = rad * (0.6 + r() * 0.7);
+          pts.push([Math.cos(a) * rr * 1.4, Math.sin(a) * rr * 0.8]);
+        }
+        g.fillStyle = cores[Math.floor(r() * cores.length)];
+        [-1024, 0, 1024].forEach(function (off) {
+          g.beginPath();
+          pts.forEach(function (p, idx) {
+            if (idx) g.lineTo(cx + off + p[0], cy + p[1]); else g.moveTo(cx + off + p[0], cy + p[1]);
+          });
+          g.closePath(); g.fill();
+        });
+      }
+      g.fillStyle = '#f2f7fb'; g.fillRect(0, 0, 1024, 26); g.fillRect(0, 486, 1024, 26);
+      g.fillStyle = 'rgba(255,255,255,0.32)';
+      for (var j = 0; j < 70; j++) {
+        g.beginPath();
+        g.ellipse(r() * 1024, 40 + r() * 430, 14 + r() * 40, 4 + r() * 9, 0, 0, Math.PI * 2);
+        g.fill();
+      }
+      var t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
+    }
+
+    function sunTexture() {
+      var c = document.createElement('canvas'); c.width = 256; c.height = 128;
+      var g = c.getContext('2d'), r = rng(3);
+      var gr = g.createLinearGradient(0, 0, 0, 128);
+      gr.addColorStop(0, '#ffb300'); gr.addColorStop(0.5, '#ffe27a'); gr.addColorStop(1, '#ffb300');
+      g.fillStyle = gr; g.fillRect(0, 0, 256, 128);
+      g.fillStyle = 'rgba(255,120,0,0.35)';
+      for (var i = 0; i < 40; i++) {
+        g.beginPath(); g.ellipse(r() * 256, r() * 128, 4 + r() * 12, 3 + r() * 8, 0, 0, Math.PI * 2); g.fill();
+      }
+      return new THREE.CanvasTexture(c);
+    }
+
+    function glowTexture() {
+      var c = document.createElement('canvas'); c.width = c.height = 256;
+      var g = c.getContext('2d');
+      var gr = g.createRadialGradient(128, 128, 10, 128, 128, 128);
+      gr.addColorStop(0, 'rgba(255,214,110,0.95)');
+      gr.addColorStop(0.35, 'rgba(255,170,50,0.35)');
+      gr.addColorStop(1, 'rgba(255,140,0,0)');
+      g.fillStyle = gr; g.fillRect(0, 0, 256, 256);
+      return new THREE.CanvasTexture(c);
+    }
+
+    // ---------- componentes ----------
+    AFRAME.registerComponent('sim-clock', {
+      tick: function (t, dt) {
+        if (!SIM.paused) SIM.year += (dt / 1000) / SIM.yearSeconds * SIM.speed;
+      }
+    });
+
+    AFRAME.registerComponent('sun-body', {
+      schema: { radius: { default: 0.16 } },
+      init: function () {
+        this.mesh = new THREE.Mesh(
+          new THREE.SphereBufferGeometry(this.data.radius, 40, 28),
+          new THREE.MeshBasicMaterial({ map: sunTexture() }));
+        this.el.setObject3D('mesh', this.mesh);
+        this.glow = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: glowTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+        this.glow.scale.set(0.75, 0.75, 1);
+        this.el.setObject3D('glow', this.glow);
+      },
+      tick: function (t, dt) {
+        if (SIM.paused) return;
+        this.mesh.rotation.y += dt * 0.0003 * SIM.speed;
+        var s = 0.75 + Math.sin(t * 0.002) * 0.03;
+        this.glow.scale.set(s, s, 1);
+      }
+    });
+
+    AFRAME.registerComponent('earth-body', {
+      schema: { radius: { default: 0.07 } },
+      init: function () {
+        var R = this.data.radius, group = new THREE.Group();
+        this.mesh = new THREE.Mesh(
+          new THREE.SphereBufferGeometry(R, 48, 32),
+          new THREE.MeshStandardMaterial({ map: earthTexture(), roughness: 0.85, metalness: 0 }));
+        group.add(this.mesh);
+
+        // atmosfera (brilho azul na borda)
+        group.add(new THREE.Mesh(
+          new THREE.SphereBufferGeometry(R * 1.07, 32, 24),
+          new THREE.MeshBasicMaterial({ color: 0x6fb7ff, transparent: true, opacity: 0.16,
+            side: THREE.BackSide, blending: THREE.AdditiveBlending, depthWrite: false })));
+
+        // eixo de rotação e polo norte
+        var lg = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(0, -R * 1.9, 0), new THREE.Vector3(0, R * 1.9, 0)]);
+        group.add(new THREE.Line(lg, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 })));
+        var polo = new THREE.Mesh(new THREE.SphereBufferGeometry(R * 0.1, 12, 8),
+          new THREE.MeshBasicMaterial({ color: 0xff5a5a }));
+        polo.position.set(0, R * 1.9, 0);
+        group.add(polo);
+
+        // inclinação fixa no espaço: no solstício de junho o polo norte aponta para o Sol
+        var th = 2 * Math.PI * JUNE_DAY / 365, s = Math.sin(TILT), c = Math.cos(TILT);
+        var n = new THREE.Vector3(-s * Math.cos(th), c, s * Math.sin(th));
+        group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+        this.el.setObject3D('body', group);
+      },
+      tick: function (t, dt) {
+        if (SIM.paused) return;
+        // rotação (visual: 1 volta a cada 2,5 s, sem acelerar demais)
+        this.mesh.rotation.y += (dt / 1000) * 2 * Math.PI / 2.5 * Math.min(SIM.speed, 2);
+      }
+    });
+
+    AFRAME.registerComponent('earth-orbit', {
+      schema: { radius: { default: 0.8 } },
+      tick: function () {
+        var th = 2 * Math.PI * SIM.year, R = this.data.radius;
+        this.el.object3D.position.set(R * Math.cos(th), 0, -R * Math.sin(th)); // sentido anti-horário visto de cima
+      }
+    });
+
+    AFRAME.registerComponent('moon-body', {
+      schema: { radius: { default: 0.02 }, distance: { default: 0.15 } },
+      init: function () {
+        this.el.setObject3D('mesh', new THREE.Mesh(
+          new THREE.SphereBufferGeometry(this.data.radius, 24, 16),
+          new THREE.MeshStandardMaterial({ color: 0xc8c8c8, roughness: 1, metalness: 0 })));
+      },
+      tick: function () {
+        var ph = 2 * Math.PI * SIM.year * 365 / 27.32, r = this.data.distance, inc = 5.1 * DEG;
+        this.el.object3D.position.set(r * Math.cos(ph), r * Math.sin(ph) * Math.sin(inc), -r * Math.sin(ph) * Math.cos(inc));
+      }
+    });
+
+    AFRAME.registerComponent('orbit-ring', {
+      schema: { radius: { default: 0.8 } },
+      init: function () {
+        var R = this.data.radius;
+        var ring = new THREE.Mesh(new THREE.RingBufferGeometry(R - 0.004, R + 0.004, 128),
+          new THREE.MeshBasicMaterial({ color: 0x8ecbff, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false }));
+        ring.rotation.x = -Math.PI / 2;
+        this.el.setObject3D('ring', ring);
+      }
+    });
+
+    // pontos e rótulos dos equinócios e solstícios sobre a órbita
+    AFRAME.registerComponent('season-marks', {
+      schema: { radius: { default: 0.8 } },
+      init: function () {
+        var R = this.data.radius, el = this.el, group = new THREE.Group();
+        var marcas = [
+          { dia: 79,  txt: 'Equinócio\n20 mar' }, { dia: 172, txt: 'Solstício\n21 jun' },
+          { dia: 265, txt: 'Equinócio\n22 set' }, { dia: 355, txt: 'Solstício\n21 dez' }];
+        marcas.forEach(function (m) {
+          var th = 2 * Math.PI * m.dia / 365, x = R * Math.cos(th), z = -R * Math.sin(th);
+          var d = new THREE.Mesh(new THREE.SphereBufferGeometry(0.012, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+          d.position.set(x, 0, z); group.add(d);
+          var t = document.createElement('a-entity');
+          t.setAttribute('class', 'label');
+          t.setAttribute('billboard', '');
+          t.setAttribute('position', (x * 1.22) + ' 0.04 ' + (z * 1.22));
+          t.setAttribute('text', { value: m.txt, align: 'center', width: 0.5, color: '#ffffff' });
+          el.appendChild(t);
+        });
+        el.setObject3D('dots', group);
+      }
+    });
+
+    // rastro da Terra, apagando gradualmente
+    AFRAME.registerComponent('trail', {
+      schema: { target: { type: 'selector' }, count: { default: 70 } },
+      init: function () {
+        var N = this.data.count;
+        this.pos = new Float32Array(N * 3);
+        var col = new Float32Array(N * 3);
+        for (var i = 0; i < N; i++) { var f = 1 - i / N; col[i * 3] = 0.45 * f; col[i * 3 + 1] = 0.75 * f; col[i * 3 + 2] = 1.0 * f; }
+        var geo = new THREE.BufferGeometry();
+        var add = geo.setAttribute || geo.addAttribute;
+        add.call(geo, 'position', new THREE.BufferAttribute(this.pos, 3));
+        add.call(geo, 'color', new THREE.BufferAttribute(col, 3));
+        this.line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+          vertexColors: THREE.VertexColors, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+        this.line.frustumCulled = false;
+        this.el.setObject3D('trail', this.line);
+        this.last = new THREE.Vector3(1e9, 1e9, 1e9);
+        this.started = false;
+      },
+      tick: function () {
+        var tgt = this.data.target; if (!tgt) return;
+        var p = tgt.object3D.position, N = this.data.count, a = this.pos;
+        if (p.distanceTo(this.last) < 0.012) return;
+        this.last.copy(p);
+        if (!this.started) { for (var i = 0; i < N; i++) { a[i * 3] = p.x; a[i * 3 + 1] = p.y; a[i * 3 + 2] = p.z; } this.started = true; }
+        else { a.copyWithin(3, 0, (N - 1) * 3); a[0] = p.x; a[1] = p.y; a[2] = p.z; }
+        this.line.geometry.attributes.position.needsUpdate = true;
+      }
+    });
+
+    // rótulos sempre virados para a câmera
+    AFRAME.registerComponent('billboard', {
+      init: function () { this.v = new THREE.Vector3(); },
+      tick: function () {
+        var cam = this.el.sceneEl.camera; if (!cam) return;
+        cam.getWorldPosition(this.v);
+        this.el.object3D.lookAt(this.v);
+      }
+    });
+
+    // ---------- interface (HUD) ----------
+    var MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    var DIAS = [31,28,31,30,31,30,31,31,30,31,30,31];
+
+    function estacao(dia, sul) {
+      var inv = dia >= 355 || dia < 79, pri = dia >= 79 && dia < 172, ver = dia >= 172 && dia < 265;
+      if (!sul) return inv ? 'Inverno' : pri ? 'Primavera' : ver ? 'Verão' : 'Outono';
+      return inv ? 'Verão' : pri ? 'Outono' : ver ? 'Inverno' : 'Primavera';
+    }
+
+    function atualizaHud() {
+      var dia = Math.floor(((SIM.year % 1) + 1) % 1 * 365), m = 0, resto = dia;
+      while (m < 11 && resto >= DIAS[m]) { resto -= DIAS[m]; m++; }
+      document.getElementById('mes').textContent = MESES[m] + ' (dia ' + (dia + 1) + ')';
+      document.getElementById('estacao').textContent =
+        'Hemisfério Sul: ' + estacao(dia, true) + '  |  Norte: ' + estacao(dia, false);
+    }
+    setInterval(atualizaHud, 200);
+
+    function marca(btns, ativo) { btns.forEach(function (b) { b.classList.toggle('on', b === ativo); }); }
+
+    document.addEventListener('DOMContentLoaded', function () {
+      var vel = Array.prototype.slice.call(document.querySelectorAll('#controles button[data-v]'));
+      vel.forEach(function (b) {
+        b.addEventListener('click', function () { SIM.speed = parseFloat(b.getAttribute('data-v')); marca(vel, b); });
+      });
+      var bP = document.getElementById('bPausa');
+      bP.addEventListener('click', function () {
+        SIM.paused = !SIM.paused; bP.textContent = SIM.paused ? 'Continuar' : 'Pausar';
+      });
+      var bR = document.getElementById('bRotulos');
+      bR.addEventListener('click', function () {
+        SIM.labels = !SIM.labels; bR.classList.toggle('on', SIM.labels);
+        document.querySelectorAll('.label').forEach(function (e) { e.setAttribute('visible', SIM.labels); });
+      });
+
+      var st = document.getElementById('status'), mk = document.getElementById('marcador');
+      mk.addEventListener('markerFound', function () { st.textContent = 'Marcador detectado'; st.className = 'ok'; });
+      mk.addEventListener('markerLost', function () { st.textContent = 'Procurando o marcador Hiro...'; st.className = ''; });
+    });
+
+    window.addEventListener('camera-error', function () {
+      var l = document.querySelector('.arjs-loader div');
+      if (l) l.innerHTML = 'Não consegui abrir a câmera.<br />Permita o acesso e abra o link em HTTPS.';
+    });
+  })();
+  </script>
+</body>
+</html>
