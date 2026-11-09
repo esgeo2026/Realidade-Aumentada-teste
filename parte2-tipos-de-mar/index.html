@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <!-- Zoom da página travado de propósito: o AR.js estica o vídeo da câmera para cobrir a tela e, sem esta trava,
+       o navegador "dá zoom para fora" para caber o excesso e a página fica enorme, com os botões fora de vista. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no" />
+  <link rel="icon" href="data:," />
+  <title>Tipos de mar em Realidade Aumentada</title>
+
+  <!-- Bibliotecas guardadas dentro da pasta libs/: a atividade não busca nada em sites de terceiros. -->
+  <script src="libs/aframe.min.js"></script>
+  <script src="libs/aframe-ar.js"></script>
+  <!-- Fotos, cartões e calibração guardados dentro de um .js: o Chrome bloqueia a leitura de arquivos soltos quando a página é aberta com dois cliques. -->
+  <script src="dados-embutidos.js"></script>
+
+  <style>
+    /* ---------- Base: texto claro sobre fundo azul escuro (alto contraste), fonte do sistema ---------- */
+    * { box-sizing: border-box; }
+    /* IMPORTANTE: o body fica transparente. O vídeo da câmera fica ATRÁS da página,
+       e um fundo sólido no body esconderia a imagem da câmera. */
+    html { background: #07203f; }
+    html, body { margin: 0; height: 100%; overflow: hidden; font-family: Arial, system-ui, sans-serif;
+      font-size: 18px; line-height: 1.4; color: #fff; }
+    body { background: transparent; }
+    body.sem-camera { background: linear-gradient(160deg, #0a3a78, #07203f); }
+    #error-popup { display: none !important; }       /* aviso em inglês do AR.js: usamos o nosso, em português */
+
+    button { font-family: inherit; font-size: 18px; font-weight: bold; color: #fff; background: #1b6fb3;
+      border: 2px solid #fff; border-radius: 14px; min-height: 52px; padding: 10px 18px; cursor: pointer; }
+    button:active { background: #14558a; }
+    button.claro { background: #fff; color: #07203f; }
+    button.grande { min-height: 60px; font-size: 20px; width: 100%; max-width: 360px; }
+    button:focus-visible, [role=button]:focus-visible { outline: 4px solid #ffd166; outline-offset: 2px; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    h2 { font-size: 24px; margin: 0 0 8px; }
+    .oculto { display: none !important; }
+
+    /* ---------- Telas cheias (início, ficha, comparar, perguntas, escolha) ---------- */
+    .tela { position: fixed; inset: 0; z-index: 9000; background: #07203f; overflow-y: auto;
+      padding: 20px 16px 28px; }
+    .tela .miolo { max-width: 560px; margin: 0 auto; }
+    #inicio { display: flex; align-items: center; justify-content: center; text-align: center; }
+    #inicio ol { text-align: left; padding-left: 24px; margin: 14px 0 20px; }
+    #inicio .botoes { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+    #msg { margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: #7a1f12; border: 2px solid #ffb4a8; text-align: left; }
+    #msg.info { background: #14558a; border-color: #9fd0ff; }
+    .privacidade { margin-top: 18px; font-size: 16px; color: #cfe3f7; }
+
+    /* ---------- Ajuda com a câmera ---------- */
+    #ajuda details { background: rgba(255,255,255,.08); border-radius: 12px; padding: 10px 14px; margin: 10px 0; }
+    #ajuda summary { font-weight: bold; cursor: pointer; min-height: 32px; }
+    #ajuda ol { margin: 8px 0 0; padding-left: 22px; }
+    #ajuda li { margin: 4px 0; }
+    #situacao { padding: 12px 14px; border-radius: 12px; border: 2px solid #fff; font-weight: bold; margin: 12px 0; }
+    #situacao.ok { background: #1d6b34; } #situacao.ruim { background: #7a1f12; } #situacao.neutra { background: #14558a; }
+    #endPerm { width: 100%; font-size: 17px; padding: 12px; border-radius: 10px; border: 2px solid #fff; background: #0a2f66; color: #fff; margin: 8px 0; }
+
+    /* ---------- Camada da RA (aviso, painel flutuante, barra de botões) ---------- */
+    #hud { position: fixed; inset: 0; z-index: 50; pointer-events: none; }
+    #hud > * { pointer-events: auto; }
+    #aviso { position: absolute; top: 14px; left: 12px; right: 12px; margin: 0 auto; max-width: 520px; text-align: center;
+      background: rgba(7, 32, 63, .92); border: 2px solid #fff; border-radius: 14px; padding: 12px 14px; font-weight: bold; }
+    /* Painel e botões ficam na mesma coluna, no pé da tela, para um nunca cobrir o outro */
+    #base { position: absolute; left: 8px; right: 8px; bottom: 10px; margin: 0 auto; max-width: 560px;
+      display: flex; flex-direction: column; gap: 8px; }
+    #painel { width: 100%;
+      background: rgba(7, 32, 63, .94); border: 3px solid #fff; border-radius: 18px; padding: 12px; cursor: pointer; }
+    #painel .linha { display: flex; gap: 12px; align-items: center; }
+    #painel img { width: 92px; height: 92px; object-fit: cover; border-radius: 10px; border: 2px solid #fff; flex: none; }
+    #painel .nome { font-size: 24px; font-weight: bold; line-height: 1.15; }
+    #painel .frase { font-size: 19px; margin-top: 4px; }
+    #painel .dica { margin-top: 8px; font-size: 16px; color: #ffd166; font-weight: bold; text-align: center; }
+    #barra { display: flex; gap: 8px; }
+    #barra button { flex: 1 1 0; min-width: 0; font-size: 16px; padding: 8px 6px; line-height: 1.2; }
+
+    /* ---------- Animação da ligação com o oceano (SVG) ---------- */
+    .anim { width: 100%; max-width: 380px; display: block; margin: 10px auto 0; }
+    .anim text { font-family: Arial, sans-serif; }
+    @keyframes tracejado { to { stroke-dashoffset: -28; } }
+    @keyframes fluxo { 0% { transform: translateX(0); opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { transform: translateX(120px); opacity: 0; } }
+    @keyframes pulsa { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(10px); } }
+    .anim .trac { stroke-dasharray: 10 8; animation: tracejado 1s linear infinite; }
+    .anim .ponto { animation: fluxo 1.6s linear infinite; }
+    .anim .ponto:nth-of-type(2) { animation-delay: .5s; }
+    .anim .ponto:nth-of-type(3) { animation-delay: 1s; }
+    .anim .seta { animation: pulsa 1.2s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) { .anim * { animation: none !important; } }
+
+    /* ---------- Ficha ---------- */
+    .ficha-foto { width: 100%; max-height: 300px; object-fit: contain; background: #000; border-radius: 12px; border: 2px solid #fff; }
+    .legenda { font-size: 15px; color: #cfe3f7; margin: 4px 0 12px; }
+    .bloco { background: rgba(255,255,255,.08); border-radius: 12px; padding: 10px 14px; margin: 10px 0; }
+    .bloco b { color: #ffd166; }
+    .bloco ul { margin: 6px 0 0; padding-left: 22px; }
+    .acoes { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+    .acoes button { flex: 1 1 150px; }
+
+    /* ---------- Comparar os três ---------- */
+    .tres { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+    .tres .col { background: rgba(255,255,255,.08); border: 2px solid #fff; border-radius: 12px; padding: 8px; text-align: center; }
+    .tres img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; }
+    .tres .n { font-size: 16px; font-weight: bold; margin: 8px 0 4px; overflow-wrap: anywhere; }
+    .tres .f { font-size: 15px; margin-bottom: 8px; overflow-wrap: anywhere; }
+    .tres button { width: 100%; font-size: 16px; padding: 8px 4px; }
+
+    /* ---------- Perguntas ---------- */
+    .opcoes { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
+    .opcoes button { text-align: left; }
+    .opcoes button.certa { background: #1d6b34; }
+    .opcoes button.errada { background: #7a1f12; }
+    #retorno { min-height: 56px; font-size: 20px; font-weight: bold; }
+    #retorno.ok { color: #9ef0b0; }
+    #retorno.erro { color: #ffd0c8; }
+  </style>
+</head>
+<body class="sem-camera">
+
+  <!-- ============ Tela inicial ============ -->
+  <div id="inicio" class="tela">
+    <div class="miolo">
+      <h1>Tipos de mar em Realidade Aumentada</h1>
+      <p>Descubra a diferença entre mar fechado, mar interior e mar aberto olhando fotos de satélite.</p>
+      <ol>
+        <li>Toque em <b>Começar</b> e permita o uso da câmera.</li>
+        <li>Aponte a câmera para um dos três cartões impressos.</li>
+        <li>Toque no painel que aparece para ver a ficha do mar.</li>
+      </ol>
+      <div class="botoes">
+        <button id="bComecar" class="grande">Começar</button>
+        <button id="bSemCameraInicio" class="grande claro">Usar sem câmera</button>
+        <button id="bAjuda" class="grande claro">Ajuda com a câmera</button>
+      </div>
+      <div id="msg" class="oculto" role="alert"></div>
+      <p class="privacidade">Esta atividade não pede cadastro e não coleta nem guarda nenhum dado dos alunos.</p>
+    </div>
+  </div>
+
+  <!-- ============ Camada da RA ============ -->
+  <div id="hud" class="oculto">
+    <div id="aviso" class="oculto" role="status">Aponte a câmera para um cartão e aproxime um pouco</div>
+    <div id="base">
+    <div id="painel" class="oculto" role="button" tabindex="0" aria-label="Abrir a ficha deste tipo de mar"></div>
+    <div id="barra">
+      <button id="bComparar">Comparar os três</button>
+      <button id="bPerguntas">Perguntas</button>
+      <button id="bSemCamera" class="claro">Sem câmera</button>
+    </div>
+    </div>
+  </div>
+
+  <!-- ============ Ajuda com a câmera (atalho das permissões) ============ -->
+  <div id="ajuda" class="tela oculto" role="dialog" aria-modal="true" aria-labelledby="ajudaTitulo">
+    <div class="miolo">
+      <h2 id="ajudaTitulo">Ajuda com a câmera</h2>
+      <div id="situacao" class="neutra" role="status">Verificando...</div>
+      <div class="acoes">
+        <button id="bPermitir">Permitir a câmera agora</button>
+        <button id="bVoltarAjuda" class="claro">Voltar</button>
+      </div>
+      <p><b>Se a câmera estiver bloqueada</b>, o botão acima não consegue pedir de novo: é preciso liberar nas configurações do navegador. Siga o passo a passo do seu aparelho:</p>
+      <details id="dAndroid"><summary>Celular Android (Chrome)</summary><ol>
+        <li>Toque no ícone à esquerda do endereço (cadeado ou ajustes).</li>
+        <li>Toque em <b>Permissões</b> e depois em <b>Câmera</b>.</li>
+        <li>Escolha <b>Permitir</b>.</li>
+        <li>Recarregue a página e toque em <b>Começar</b>.</li></ol></details>
+      <details id="dIphone"><summary>iPhone (Safari)</summary><ol>
+        <li>Toque no ícone <b>aA</b> (ou nos três pontinhos) na barra de endereço.</li>
+        <li>Toque em <b>Ajustes do site</b> e, em <b>Câmera</b>, escolha <b>Permitir</b>.</li>
+        <li>Se não aparecer: abra <b>Ajustes</b> do iPhone, <b>Safari</b>, <b>Câmera</b> e escolha <b>Perguntar</b> ou <b>Permitir</b>.</li>
+        <li>Recarregue a página e toque em <b>Começar</b>.</li></ol></details>
+      <details id="dPc"><summary>Computador (Chrome ou Edge)</summary><ol>
+        <li>Clique no ícone à esquerda do endereço (cadeado ou ajustes) e em <b>Câmera</b>, escolha <b>Permitir</b>.</li>
+        <li>Ou copie o endereço abaixo, cole na barra de endereço de uma nova aba e libere o site:
+          <input id="endPerm" type="text" readonly value="chrome://settings/content/camera" aria-label="Endereço das permissões da câmera" />
+          <button id="bCopiar" class="claro">Copiar o endereço das permissões</button><span id="copiado" role="status"></span></li>
+        <li>Recarregue a página e clique em <b>Começar</b>.</li>
+        <li>Se o computador não tiver câmera, use <b>Usar sem câmera</b>.</li></ol></details>
+      <p class="legenda">Dica: feche outros programas que usam a câmera (Zoom, Meet, Teams, outras abas) e tente de novo.</p>
+    </div>
+  </div>
+
+  <!-- ============ Modo sem câmera: escolha do tipo ============ -->
+  <div id="escolha" class="tela oculto">
+    <div class="miolo">
+      <h1>Escolha um tipo de mar</h1>
+      <p>Toque em um botão para ver a ficha com a foto de satélite.</p>
+      <div class="opcoes" id="listaEscolha"></div>
+      <div class="acoes">
+        <button id="bCompararEscolha" class="claro">Comparar os três</button>
+        <button id="bPerguntasEscolha" class="claro">Perguntas</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Ficha ============ -->
+  <div id="ficha" class="tela oculto" role="dialog" aria-modal="true" aria-labelledby="fichaTitulo">
+    <div class="miolo" id="fichaMiolo"></div>
+  </div>
+
+  <!-- ============ Comparar ============ -->
+  <div id="comparar" class="tela oculto" role="dialog" aria-modal="true" aria-labelledby="compararTitulo">
+    <div class="miolo">
+      <h2 id="compararTitulo">Comparar os três tipos de mar</h2>
+      <p>Observe nas fotos de satélite como cada mar se liga ao oceano.</p>
+      <div class="tres" id="tres"></div>
+      <div class="acoes"><button id="bFecharComparar" class="claro">Fechar</button><button id="bIrPerguntas">Fazer as perguntas</button></div>
+    </div>
+  </div>
+
+  <!-- ============ Perguntas ============ -->
+  <div id="perguntas" class="tela oculto" role="dialog" aria-modal="true" aria-labelledby="perguntaTitulo">
+    <div class="miolo" id="perguntasMiolo"></div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    // =====================================================================
+    // 1. CONTEÚDO (textos e fotos). Para mudar um texto, é só editar aqui.
+    // =====================================================================
+    var TIPOS = {
+      fechado: {
+        nome: 'Mar fechado',
+        frase: 'Mar cercado por terras',
+        definicao: 'Mar cercado por terras, sem ligação com o oceano.',
+        exemplos: ['Mar Morto', 'Mar Cáspio', 'Mar de Aral'],
+        foto: 'imagens/mar-caspio.jpg', fotoNome: 'Mar Cáspio', fotoDe: 'do mar Cáspio', proporcao: 960 / 1222,
+        marcador: 'marcadores/fechado.patt',
+        ligacao: 'Sem ligação com o oceano: o mar está trancado entre as terras.'
+      },
+      interior: {
+        nome: 'Mar interior ou continental',
+        frase: 'Ligação estreita com o oceano',
+        definicao: 'Mar que fica entre continentes e tem ligação estreita com o oceano.',
+        exemplos: ['Mar Negro', 'Mar Mediterrâneo', 'Mar Vermelho'],
+        foto: 'imagens/mar-mediterraneo.jpg', fotoNome: 'Mar Mediterrâneo', fotoDe: 'do mar Mediterrâneo', proporcao: 1024 / 424,
+        marcador: 'marcadores/interior.patt',
+        ligacao: 'Ligação estreita com o oceano: a água passa por um canal.'
+      },
+      aberto: {
+        nome: 'Mar aberto',
+        frase: 'Comunicação ampla com o oceano',
+        definicao: 'Mar que tem comunicação ampla e direta com o oceano.',
+        exemplos: ['Mar do Caribe', 'Mar do Norte', 'Mar da Tasmânia'],
+        foto: 'imagens/mar-do-norte.jpg', fotoNome: 'Mar do Norte', fotoDe: 'do mar do Norte', proporcao: 960 / 1165,
+        marcador: 'marcadores/aberto.patt',
+        ligacao: 'Comunicação ampla e direta: a água circula livremente com o oceano.'
+      }
+    };
+    var ORDEM = ['fechado', 'interior', 'aberto'];
+
+    // Se existir dados-embutidos.js, usa os dados de lá. Converte cada um em um endereço "blob:" curto:
+    // o Chrome aceita ler esses endereços mesmo quando a página é aberta com dois cliques (file://).
+    function blobUrl(dataUrl) {
+      var partes = dataUrl.split(','), tipo = partes[0].slice(5).split(';')[0], bin = atob(partes[1]), u = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      return URL.createObjectURL(new Blob([u], { type: tipo }));
+    }
+    var CAMERA_PARAMS = 'libs/camera_para.dat';
+    if (window.EMBUTIDOS) {
+      CAMERA_PARAMS = blobUrl(window.EMBUTIDOS.camera);
+      ORDEM.forEach(function (id) {
+        TIPOS[id].foto = blobUrl(window.EMBUTIDOS.foto[id]);
+        TIPOS[id].marcador = blobUrl(window.EMBUTIDOS.patt[id]);
+      });
+    }
+    var INFLUENCIA = 'Em todos os casos, os mares recebem mais influência dos continentes do que os oceanos, ' +
+      'por estarem mais próximos da costa, terem menor extensão e serem menos profundos.';
+    var CREDITO_FOTO = 'Imagem de satélite da NASA (domínio público).';
+
+    // =====================================================================
+    // 2. FUNÇÕES AUXILIARES
+    // =====================================================================
+    function $(id) { return document.getElementById(id); }
+    function mostra(el, sim) { el.classList.toggle('oculto', !sim); }
+
+    // Desenha a animação da ligação entre o mar e o oceano (SVG com animação em CSS).
+    function animacao(tipo) {
+      var mar = '<rect x="0" y="10" width="95" height="90" rx="14" fill="#2b8fd8"/>' +
+        '<text x="47" y="62" text-anchor="middle" fill="#fff" font-size="20" font-weight="bold">Mar</text>';
+      var oceano = '<rect x="225" y="10" width="95" height="90" rx="14" fill="#0a2f66" stroke="#9fd0ff" stroke-width="2"/>' +
+        '<text x="272" y="62" text-anchor="middle" fill="#fff" font-size="18" font-weight="bold">Oceano</text>';
+      var meio = '';
+      if (tipo === 'fechado') {
+        // faixa de terra fechando tudo, linha tracejada e cadeado
+        meio = '<rect x="135" y="10" width="50" height="90" rx="6" fill="#b5895a"/>' +
+          '<line class="trac" x1="97" y1="55" x2="223" y2="55" stroke="#fff" stroke-width="4"/>' +
+          '<path d="M150 52 v-8 a10 10 0 0 1 20 0 v8" fill="none" stroke="#ffd166" stroke-width="5"/>' +
+          '<rect x="144" y="52" width="32" height="26" rx="4" fill="#ffd166"/>' +
+          '<circle cx="160" cy="63" r="4" fill="#07203f"/><rect x="158.5" y="64" width="3" height="8" fill="#07203f"/>';
+      } else if (tipo === 'interior') {
+        // terra em cima e embaixo, deixando um canal estreito com pontos de água passando
+        meio = '<rect x="110" y="10" width="100" height="34" rx="6" fill="#b5895a"/>' +
+          '<rect x="110" y="66" width="100" height="34" rx="6" fill="#b5895a"/>' +
+          '<rect x="96" y="46" width="128" height="18" fill="#2b8fd8" opacity=".55"/>' +
+          '<circle class="ponto" cx="100" cy="55" r="5" fill="#fff"/>' +
+          '<circle class="ponto" cx="100" cy="55" r="5" fill="#fff"/>' +
+          '<circle class="ponto" cx="100" cy="55" r="5" fill="#fff"/>';
+      } else {
+        // seta larga entre o mar e o oceano, sem terra no caminho
+        meio = '<path class="seta" d="M100 32 H178 V12 L222 55 L178 98 V78 H100 Z" fill="#fff"/>';
+      }
+      return '<svg class="anim" viewBox="0 0 320 110" role="img" aria-label="' + TIPOS[tipo].ligacao + '">' + mar + meio + oceano + '</svg>';
+    }
+
+    // =====================================================================
+    // 3. TELAS (abrir e fechar)
+    // =====================================================================
+    var TELAS = ['inicio', 'escolha', 'ficha', 'comparar', 'perguntas', 'ajuda'];
+    var modo = 'inicio';                         // 'inicio', 'ar' ou 'semcamera'
+    
+    function abrir(nome) {
+      TELAS.forEach(function (t) { mostra($(t), t === nome); });
+    }
+    function fecharTelas() {                      // volta para a RA ou para a escolha sem câmera
+      TELAS.forEach(function (t) { mostra($(t), false); });
+      if (modo === 'semcamera') mostra($('escolha'), true);
+    }
+
+    // ---------- Ficha ----------
+    function abrirFicha(id) {
+      var t = TIPOS[id];
+      $('fichaMiolo').innerHTML =
+        '<h2 id="fichaTitulo">' + t.nome + '</h2>' +
+        '<p style="font-size:20px;margin:0 0 10px"><b>' + t.frase + '</b></p>' +
+        '<img class="ficha-foto" src="' + t.foto + '" alt="Foto de satélite ' + t.fotoDe + '" />' +
+        '<div class="legenda">' + t.fotoNome + '. ' + CREDITO_FOTO + '</div>' +
+        animacao(id) +
+        '<div class="bloco"><b>Definição</b><br>' + t.definicao + '</div>' +
+        '<div class="bloco"><b>Exemplos</b><ul>' + t.exemplos.map(function (e) { return '<li>' + e + '</li>'; }).join('') + '</ul></div>' +
+        '<div class="bloco"><b>Influência</b><br>' + INFLUENCIA + '</div>' +
+        '<div class="acoes"><button id="fFechar" class="claro">Fechar</button><button id="fComparar">Comparar os três</button></div>';
+      abrir('ficha');
+      $('fFechar').onclick = fecharTelas;
+      $('fComparar').onclick = abrirComparar;
+      $('ficha').scrollTop = 0;
+    }
+
+    // ---------- Comparar os três ----------
+    function abrirComparar() {
+      $('tres').innerHTML = ORDEM.map(function (id) {
+        var t = TIPOS[id];
+        return '<div class="col"><img src="' + t.foto + '" alt="Foto de satélite ' + t.fotoDe + '" />' +
+          '<div class="n">' + t.nome + '</div><div class="f">' + t.frase + '</div>' +
+          '<button data-id="' + id + '">Ver ficha</button></div>';
+      }).join('');
+      Array.prototype.forEach.call($('tres').querySelectorAll('button'), function (b) {
+        b.onclick = function () { abrirFicha(b.getAttribute('data-id')); };
+      });
+      abrir('comparar');
+      $('comparar').scrollTop = 0;
+    }
+
+    // ---------- Perguntas (uma por tipo de mar, com retorno imediato) ----------
+    var quiz = { i: 0, acertos: 0 };
+    function embaralha(v) {
+      var a = v.slice();
+      for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; }
+      return a;
+    }
+    function abrirPerguntas() { quiz.i = 0; quiz.acertos = 0; mostraPergunta(); abrir('perguntas'); }
+    function mostraPergunta() {
+      var id = ORDEM[quiz.i], t = TIPOS[id], m = $('perguntasMiolo');
+      m.innerHTML =
+        '<h2 id="perguntaTitulo">Pergunta ' + (quiz.i + 1) + ' de ' + ORDEM.length + '</h2>' +
+        '<img class="ficha-foto" src="' + t.foto + '" alt="Foto de satélite ' + t.fotoDe + '" />' +
+        '<div class="legenda">' + t.fotoNome + '. ' + CREDITO_FOTO + '</div>' +
+        '<p style="font-size:20px"><b>Observe a foto de satélite ' + t.fotoDe + '. Que tipo de mar ele é?</b></p>' +
+        '<div class="opcoes" id="opcoes"></div>' +
+        '<div id="retorno" role="status" aria-live="polite"></div>' +
+        '<div class="acoes"><button id="qFechar" class="claro">Fechar</button><button id="qProxima" class="oculto"></button></div>';
+      embaralha(ORDEM).forEach(function (op) {
+        var b = document.createElement('button');
+        b.textContent = TIPOS[op].nome; b.setAttribute('data-op', op);
+        b.onclick = function () { responde(id, op); };
+        $('opcoes').appendChild(b);
+      });
+      $('qFechar').onclick = fecharTelas;
+      $('perguntas').scrollTop = 0;
+    }
+    function responde(certo, escolhido) {
+      var r = $('retorno'), ok = certo === escolhido;
+      Array.prototype.forEach.call($('opcoes').querySelectorAll('button'), function (b) {
+        b.disabled = true;
+        if (b.getAttribute('data-op') === certo) b.classList.add('certa');
+        else if (b.getAttribute('data-op') === escolhido) b.classList.add('errada');
+      });
+      if (ok) { quiz.acertos++; r.className = 'ok'; r.textContent = 'Isso mesmo!'; }
+      else { r.className = 'erro'; r.textContent = 'A resposta correta é: ' + TIPOS[certo].nome + '. ' + TIPOS[certo].frase + '.'; }
+      var p = $('qProxima'); mostra(p, true);
+      if (quiz.i < ORDEM.length - 1) {
+        p.textContent = 'Próxima pergunta';
+        p.onclick = function () { quiz.i++; mostraPergunta(); };
+      } else {
+        p.textContent = 'Ver meu resultado';
+        p.onclick = resultado;
+      }
+      p.focus();
+    }
+    function resultado() {
+      $('perguntasMiolo').innerHTML =
+        '<h2 id="perguntaTitulo">Resultado</h2>' +
+        '<p style="font-size:22px"><b>Você acertou ' + quiz.acertos + ' de ' + ORDEM.length + ' perguntas.</b></p>' +
+        '<p>Quer rever alguma ficha? Use o botão Comparar os três.</p>' +
+        '<div class="acoes"><button id="rRecomecar">Recomeçar</button><button id="rComparar" class="claro">Comparar os três</button><button id="rFechar" class="claro">Fechar</button></div>';
+      $('rRecomecar').onclick = abrirPerguntas;
+      $('rComparar').onclick = abrirComparar;
+      $('rFechar').onclick = fecharTelas;
+    }
+
+    // ---------- Botões fixos ----------
+    $('bComparar').onclick = abrirComparar;
+    $('bPerguntas').onclick = abrirPerguntas;
+    $('bCompararEscolha').onclick = abrirComparar;
+    $('bPerguntasEscolha').onclick = abrirPerguntas;
+    $('bFecharComparar').onclick = fecharTelas;
+    $('bIrPerguntas').onclick = abrirPerguntas;
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && modo !== 'inicio') fecharTelas(); });
+
+    // =====================================================================
+    // 4. MODO SEM CÂMERA (a atividade funciona mesmo se a RA falhar)
+    // =====================================================================
+    function entrarSemCamera() {
+      modo = 'semcamera';
+      document.body.classList.add('sem-camera');
+      mostra($('hud'), false);
+      $('listaEscolha').innerHTML = '';
+      ORDEM.forEach(function (id) {
+        var b = document.createElement('button');
+        b.textContent = TIPOS[id].nome; b.onclick = function () { abrirFicha(id); };
+        $('listaEscolha').appendChild(b);
+      });
+      TELAS.forEach(function (t) { mostra($(t), false); });
+      mostra($('escolha'), true);
+    }
+    $('bSemCameraInicio').onclick = entrarSemCamera;
+    $('bSemCamera').onclick = function () {       // desliga a câmera recarregando a página direto neste modo
+      location.hash = '#semcamera'; location.reload();
+    };
+
+    // =====================================================================
+    // 5. CÂMERA E RA
+    // =====================================================================
+    var iniciando = false, relogio = null, videoLigado = false;
+
+    // A câmera é aberta UMA vez só, no toque do aluno. O AR.js, ao pedir a câmera, recebe esta mesma
+    // câmera já liberada (abrir, soltar e abrir de novo falha em alguns celulares).
+    var streamPronto = null;
+    var gumOriginal = (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) ? navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices) : null;
+    if (gumOriginal) navigator.mediaDevices.getUserMedia = function (c) {
+      if (streamPronto && c && c.video) { var s = streamPronto; streamPronto = null; return Promise.resolve(s); }
+      return gumOriginal(c);
+    };
+    function soltaCamera() { if (streamPronto) { streamPronto.getTracks().forEach(function (t) { t.stop(); }); streamPronto = null; } }
+    var visiveis = {};                            // cartões que o AR.js está vendo agora
+    var ultimoVisto = 0, atual = null, esconderPainel = null;
+
+    function mensagem(texto, tipo) {
+      var m = $('msg'); m.textContent = texto; m.className = tipo === 'info' ? 'info' : '';
+      mostra(m, true);
+    }
+
+    // Traduz o erro técnico do navegador em uma frase simples
+    var detalhe = '';
+    function explicaErro(e) {
+      var nome = e && e.name ? e.name : '';
+      detalhe = nome ? ' (código técnico: ' + nome + ')' : '';
+      if (nome === 'NotAllowedError' || nome === 'SecurityError')
+        return 'A câmera foi bloqueada. Toque no cadeado ao lado do endereço do site, libere a Câmera e recarregue a página. Se preferir, use a atividade sem câmera. Toque em Ajuda com a câmera para o passo a passo.' + detalhe;
+      if (nome === 'NotFoundError' || nome === 'OverconstrainedError')
+        return 'Não encontrei uma câmera neste aparelho. Use a atividade sem câmera.' + detalhe;
+      if (nome === 'NotReadableError' || nome === 'AbortError')
+        return 'A câmera está sendo usada por outro aplicativo. Feche os outros aplicativos e abas que usam a câmera e tente de novo.' + detalhe;
+      return 'Não consegui abrir a câmera' + detalhe + '. Recarregue a página e tente de novo, ou use a atividade sem câmera.';
+    }
+
+    function falhou(texto) {
+      clearTimeout(relogio); iniciando = false; videoLigado = false; soltaCamera();
+      var cena = document.querySelector('a-scene'); if (cena && cena.parentNode) cena.parentNode.removeChild(cena);
+      mostra($('hud'), false); abrir('inicio');
+      $('bComecar').textContent = 'Tentar de novo';
+      mensagem(texto);
+    }
+
+    $('bComecar').onclick = function () {
+      if (iniciando) return;
+      iniciando = true; mostra($('msg'), false);
+      // A câmera só é pedida aqui, no toque do aluno. Precisa de endereço seguro (https).
+      if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        iniciando = false;
+        mensagem('Este navegador não liberou a câmera. Abra o endereço com https:// no Chrome (Android) ou no Safari (iPhone), fora de aplicativos como WhatsApp ou Instagram. Você também pode usar a atividade sem câmera.');
+        return;
+      }
+      mensagem('Pedindo permissão da câmera...', 'info');
+      // Pede a câmera em resolução baixa (640x480). Se funcionar, entrega esta mesma câmera ao AR.js.
+      gumOriginal({ video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false })
+        .then(function (s) {
+          streamPronto = s;
+          mensagem('Câmera liberada. Carregando...', 'info');
+          montaCena();
+        })
+        .catch(function (e) { iniciando = false; $('bComecar').textContent = 'Tentar de novo'; mensagem(explicaErro(e)); });
+    };
+
+    // Monta a cena de RA: um marcador por tipo de mar, cada um com a foto de satélite
+    // "pousada" sobre o cartão. O painel com os textos é a camada de HTML acima.
+    function montaCena() {
+      var LADO_MAX = 1.3;   // maior lado da foto sobre o cartão (o cartão mede 1)
+      var html = '<a-scene embedded vr-mode-ui="enabled: false" renderer="alpha: true" device-orientation-permission-ui="enabled: false" ' +
+        'arjs="sourceType: webcam; sourceWidth: 640; sourceHeight: 480; displayWidth: 640; displayHeight: 480; ' +
+        'debugUIEnabled: false; cameraParametersUrl: ' + CAMERA_PARAMS + ';">';
+      // Fotos usadas como textura 3D: ficam como imagens normais da página (funciona também ao abrir com dois cliques)
+      html += '<a-assets>';
+      ORDEM.forEach(function (id) {
+        html += '<img id="tex-' + id + '" src="' + (window.EMBUTIDOS ? window.EMBUTIDOS.foto[id] : TIPOS[id].foto) + '" alt="">';
+      });
+      html += '</a-assets>';
+      ORDEM.forEach(function (id) {
+        var p = TIPOS[id].proporcao, larg = p >= 1 ? LADO_MAX : LADO_MAX * p, alt = p >= 1 ? LADO_MAX / p : LADO_MAX;
+        html += '<a-marker id="m-' + id + '" type="pattern" url="' + TIPOS[id].marcador + '" smooth="true" smooth-count="5">' +
+          '<a-plane rotation="-90 0 0" position="0 0.05 0" width="' + larg.toFixed(3) + '" height="' + alt.toFixed(3) + '" ' +
+          'material="src: #tex-' + id + '; shader: flat; side: double" ' +
+          'animation="property: position; from: 0 0.05 0; to: 0 0.25 0; dir: alternate; dur: 1800; loop: true; easing: easeInOutSine"></a-plane>' +
+          '</a-marker>';
+      });
+      html += '<a-entity camera></a-entity></a-scene>';
+      document.body.insertAdjacentHTML('afterbegin', html);
+
+      ORDEM.forEach(function (id) {
+        var m = $('m-' + id);
+        m.addEventListener('markerFound', function () { visiveis[id] = true; ultimoVisto = Date.now(); mostraPainel(id); });
+        m.addEventListener('markerLost', function () { delete visiveis[id]; ultimoVisto = Date.now(); agendaEsconder(id); });
+      });
+
+      // O vídeo da câmera começou: troca a tela inicial pela camada de RA
+      window.addEventListener('arjs-video-loaded', function () {
+        clearTimeout(relogio); videoLigado = true; ultimoVisto = Date.now();
+        modo = 'ar'; document.body.classList.remove('sem-camera');
+        TELAS.forEach(function (t) { mostra($(t), false); });
+        mostra($('hud'), true); mostra($('msg'), false);
+      }, { once: true });
+      // O AR.js avisou que a câmera falhou
+      window.addEventListener('camera-error', function () {
+        falhou('Não consegui abrir a câmera. Feche outros aplicativos que a usam, recarregue a página e tente de novo, ou use a atividade sem câmera.');
+      }, { once: true });
+      // Se em 15 segundos o vídeo não começar, avisa em vez de ficar parado
+      relogio = setTimeout(function () {
+        falhou('A câmera demorou demais para iniciar. Feche outros aplicativos e abas que usam a câmera, recarregue a página e toque em Começar de novo. Você também pode usar a atividade sem câmera.');
+      }, 15000);
+    }
+
+    // ---------- Painel flutuante ----------
+    function mostraPainel(id) {
+      clearTimeout(esconderPainel);
+      var t = TIPOS[id], p = $('painel');
+      if (atual !== id || p.classList.contains('oculto')) {
+        p.innerHTML = '<div class="linha"><img src="' + t.foto + '" alt="Foto de satélite ' + t.fotoDe + '" />' +
+          '<div><div class="nome">' + t.nome + '</div><div class="frase">' + t.frase + '</div></div></div>' +
+          animacao(id) + '<div class="dica">Toque aqui para abrir a ficha</div>';
+      }
+      atual = id; mostra(p, true); mostra($('aviso'), false);
+    }
+    // Quando o cartão sai da câmera, o painel espera 3 segundos antes de sumir (evita piscar)
+    function agendaEsconder(id) {
+      clearTimeout(esconderPainel);
+      esconderPainel = setTimeout(function () {
+        if (Object.keys(visiveis).length === 0) { mostra($('painel'), false); atual = null; }
+      }, 3000);
+    }
+    $('painel').onclick = function () { if (atual) abrirFicha(atual); };
+    $('painel').onkeydown = function (e) { if ((e.key === 'Enter' || e.key === ' ') && atual) { e.preventDefault(); abrirFicha(atual); } };
+
+    // Mensagem de ajuda: se nenhum cartão for visto por 5 segundos, orienta o aluno
+    setInterval(function () {
+      if (modo !== 'ar' || !videoLigado) return;
+      var semCartao = Object.keys(visiveis).length === 0 && Date.now() - ultimoVisto > 5000;
+      mostra($('aviso'), semCartao && $('painel').classList.contains('oculto'));
+    }, 500);
+
+    // =====================================================================
+    // 6. AJUDA COM A CÂMERA (atalho das permissões)
+    // =====================================================================
+    function mostraSituacao(texto, classe) { var s = $('situacao'); s.textContent = texto; s.className = classe; }
+    function verificaPermissao() {
+      mostraSituacao('Verificando a permissão da câmera...', 'neutra');
+      if (!window.isSecureContext) { mostraSituacao('Este endereço não é seguro (precisa começar com https://). A câmera não pode ser liberada aqui.', 'ruim'); return; }
+      if (!navigator.permissions || !navigator.permissions.query) { mostraSituacao('Este navegador não informa a permissão. Toque em Permitir a câmera agora e responda à pergunta que aparecer.', 'neutra'); return; }
+      navigator.permissions.query({ name: 'camera' }).then(function (p) {
+        function atualiza() {
+          if (p.state === 'granted') mostraSituacao('Câmera LIBERADA para esta página. Volte e toque em Começar.', 'ok');
+          else if (p.state === 'denied') mostraSituacao('Câmera BLOQUEADA. Siga o passo a passo abaixo para liberar.', 'ruim');
+          else mostraSituacao('Câmera ainda não liberada. Toque em Permitir a câmera agora e escolha Permitir.', 'neutra');
+        }
+        atualiza(); p.onchange = atualiza;
+      }).catch(function () { mostraSituacao('Este navegador não informa a permissão. Toque em Permitir a câmera agora e responda à pergunta que aparecer.', 'neutra'); });
+    }
+    $('bAjuda').onclick = function () {
+      var ua = navigator.userAgent || '', edge = /Edg\//.test(ua);
+      $('endPerm').value = (edge ? 'edge' : 'chrome') + '://settings/content/camera';
+      $('dAndroid').open = /Android/i.test(ua); $('dIphone').open = /iPhone|iPad|iPod/i.test(ua);
+      $('dPc').open = !/Android|iPhone|iPad|iPod/i.test(ua);
+      $('copiado').textContent = '';
+      abrir('ajuda'); verificaPermissao(); $('ajuda').scrollTop = 0;
+    };
+    $('bVoltarAjuda').onclick = function () { abrir('inicio'); };
+    $('bPermitir').onclick = function () {
+      if (!gumOriginal) { mostraSituacao('Este navegador não consegue abrir a câmera. Use a atividade sem câmera.', 'ruim'); return; }
+      mostraSituacao('Pedindo permissão... responda à pergunta do navegador.', 'neutra');
+      gumOriginal({ video: true, audio: false }).then(function (s) {
+        s.getTracks().forEach(function (t) { t.stop(); });
+        mostraSituacao('Câmera LIBERADA. Volte e toque em Começar.', 'ok');
+      }).catch(function (e) {
+        var n = e && e.name ? e.name : 'erro';
+        mostraSituacao(n === 'NotAllowedError' ? 'A câmera está BLOQUEADA (código técnico: NotAllowedError). Siga o passo a passo abaixo.'
+          : n === 'NotFoundError' ? 'Este aparelho não tem câmera disponível (código técnico: NotFoundError). Use a atividade sem câmera.'
+          : 'Não foi possível abrir a câmera (código técnico: ' + n + '). Feche outros programas que usam a câmera e tente de novo.', 'ruim');
+      });
+    };
+    $('bCopiar').onclick = function () {
+      var campo = $('endPerm'); campo.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+      var aviso = function (sim) { $('copiado').textContent = sim ? ' Copiado!' : ' Selecionado: use Ctrl+C para copiar.'; };
+      if (ok) aviso(true);
+      else if (navigator.clipboard) navigator.clipboard.writeText(campo.value).then(function () { aviso(true); }, function () { aviso(false); });
+      else aviso(false);
+    };
+
+    // Se a página foi recarregada pelo botão "Sem câmera", entra direto nesse modo
+    if (location.hash === '#semcamera') entrarSemCamera();
+  })();
+  </script>
+</body>
+</html>
